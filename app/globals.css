@@ -1,0 +1,44 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+  --font-serif: var(--font-serif);
+}
+
+:root {
+  --bg: #E4E3E0;
+  --ink: #141414;
+  --line: rgba(20, 20, 20, 0.1);
+}
+
+body {
+  background-color: var(--bg);
+  color: var(--ink);
+}
+
+.data-grid {
+  display: grid;
+  border-top: 1px solid var(--line);
+  border-left: 1px solid var(--line);
+}
+
+.data-cell {
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  padding: 1rem;
+}
+
+.technical-label {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: 0.75rem;
+  opacity: 0.6;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.mono-value {
+  font-family: var(--font-mono);
+  letter-spacing: -0.02em;
+}
