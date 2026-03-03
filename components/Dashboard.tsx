@@ -15,7 +15,11 @@ import {
   Terminal,
   Settings,
   ShieldCheck,
-  AlertCircle
+  AlertCircle,
+  Zap,
+  Activity,
+  Cpu,
+  TrendingUp
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '@/lib/utils';
@@ -109,6 +113,73 @@ const SectionHeader = ({ title, subtitle }: any) => (
 
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState('overview');
+  const [copyStatus, setCopyStatus] = useState<string | null>(null);
+
+  const copyToClipboard = (text: string, label: string) => {
+    navigator.clipboard.writeText(text);
+    setCopyStatus(label);
+    setTimeout(() => setCopyStatus(null), 2000);
+  };
+
+  const firebaseCode = `import * as functions from 'firebase-functions';
+import * as admin from 'firebase-admin';
+import { GoogleGenAI } from "@google/genai";
+
+admin.initializeApp();
+const db = admin.firestore();
+const rtdb = admin.database();
+
+const GEMINI_API_KEY = functions.config().ouroboros?.gemini_key || process.env.GEMINI_API_KEY;
+const genAI = GEMINI_API_KEY ? new GoogleGenAI(GEMINI_API_KEY) : null;
+
+export const worldHeartbeat = functions.pubsub.schedule('every 1 minutes').onRun(async (context) => {
+  const worldRef = db.collection('world_state').doc('current');
+  const snap = await worldRef.get();
+  const state = snap.data() || { tick: 0 };
+  const newTick = (state.tick || 0) + 1;
+  await worldRef.update({ tick: newTick, last_pulse: admin.firestore.FieldValue.serverTimestamp() });
+  await rtdb.ref('live_world').set({ tick: newTick, timestamp: Date.now() });
+  return null;
+});
+
+export const generateGameContent = functions.https.onCall(async (data, context) => {
+  if (!genAI) throw new functions.https.HttpsError('failed-precondition', 'AI not configured');
+  const { type, context: gameContext } = data;
+  const model = genAI.getGenerativeModel({ model: "gemini-3-flash-preview" });
+  const prompt = \`Generate \${type} for Ouroboros MMO. Context: \${JSON.stringify(gameContext)}\`;
+  const result = await model.generateContent(prompt);
+  const content = JSON.parse(result.response.text());
+  await db.collection(type + 's').add({ ...content, created_at: admin.firestore.FieldValue.serverTimestamp() });
+  return content;
+});`;
+
+  const godotCode = `extends Node
+# --- OUROBOROS AUTO-SYNC MANAGER ---
+var player_id = ""
+var world_state = {}
+
+func _ready():
+	Firebase.Auth.login_anonymous()
+	Firebase.Auth.login_succeeded.connect(_on_login_success)
+	var rtdb_ref = Firebase.Database.get_ref("live_world")
+	rtdb_ref.on_child_changed.connect(_on_world_tick)
+
+func _on_login_success(auth):
+	player_id = auth.localid
+	var firestore_doc = Firebase.Firestore.collection("world_state").doc("current")
+	firestore_doc.get_doc()
+	firestore_doc.get_document_finished.connect(_on_state_loaded)
+
+func _on_state_loaded(doc):
+	world_state = doc.doc_fields
+
+func _on_world_tick(data):
+	print("World Heartbeat received: ", data.data)
+
+func sync_position(pos: Vector3):
+	var pos_ref = Firebase.Database.get_ref("live_positions/" + player_id)
+	pos_ref.update({"x": pos.x, "y": pos.y, "z": pos.z})`;
+
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<any>(null);
   const [worldContext, setWorldContext] = useState({
@@ -191,6 +262,7 @@ export default function Dashboard() {
           <SidebarItem icon={Code2} label="Godot Resources" active={activeTab === 'godot'} onClick={() => setActiveTab('godot')} />
           <SidebarItem icon={Database} label="Database Sync" active={activeTab === 'db'} onClick={() => setActiveTab('db')} />
           <SidebarItem icon={ShieldCheck} label="Validation Layer" active={activeTab === 'validation'} onClick={() => setActiveTab('validation')} />
+          <SidebarItem icon={Zap} label="Firebase Auto-Sync" active={activeTab === 'firebase'} onClick={() => setActiveTab('firebase')} />
         </nav>
 
         <div className="p-4 border-t border-[#141414] bg-[#141414] text-[#E4E3E0]">
@@ -560,6 +632,117 @@ npm start`}</pre>
                       Last Check: 0.00002% (PASS)
                     </div>
                   </div>
+                </div>
+              </div>
+            </motion.div>
+          )}
+          {activeTab === 'firebase' && (
+            <motion.div
+              key="firebase"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="space-y-12"
+            >
+              <SectionHeader title="Firebase Auto-Migration" subtitle="Zero-Code Backend Deployment" />
+              
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
+                <div className="space-y-6">
+                  <div className="flex items-center gap-3 mb-2">
+                    <div className="w-10 h-10 bg-[#141414] text-[#E4E3E0] rounded flex items-center justify-center">
+                      <Cpu size={20} />
+                    </div>
+                    <h3 className="font-serif italic text-3xl">1. Cloud Functions</h3>
+                  </div>
+                  <p className="text-sm opacity-70 leading-relaxed font-mono">
+                    Ports your entire Tick-Engine and AI logic to Google's serverless infrastructure. 
+                  </p>
+                  <div className="bg-[#141414] text-[#E4E3E0] p-6 rounded font-mono text-[10px] overflow-x-auto max-h-[300px] border border-white/10">
+                    <pre>{`// functions/index.ts
+import * as functions from 'firebase-functions';
+import * as admin from 'firebase-admin';
+
+admin.initializeApp();
+const db = admin.firestore();
+
+export const worldHeartbeat = functions.pubsub
+  .schedule('every 1 minutes')
+  .onRun(async (context) => {
+    // Ported from tick-engine.ts
+    const worldRef = db.collection('world_state').doc('current');
+    // ... logic continues
+  });`}</pre>
+                  </div>
+                  <button 
+                    className="w-full py-4 bg-[#141414] text-[#E4E3E0] text-[10px] font-mono uppercase tracking-widest hover:invert transition-all flex items-center justify-center gap-2"
+                    onClick={() => copyToClipboard(firebaseCode, 'Firebase Code')}
+                  >
+                    <Code2 size={14} />
+                    {copyStatus === 'Firebase Code' ? 'Copied!' : 'Copy Functions Code'}
+                  </button>
+                </div>
+
+                <div className="space-y-6">
+                  <div className="flex items-center gap-3 mb-2">
+                    <div className="w-10 h-10 border border-[#141414] rounded flex items-center justify-center">
+                      <Zap size={20} />
+                    </div>
+                    <h3 className="font-serif italic text-3xl">2. Godot Sync</h3>
+                  </div>
+                  <p className="text-sm opacity-70 leading-relaxed font-mono">
+                    GDScript to connect your Godot project to the Firebase backend.
+                  </p>
+                  <div className="bg-[#141414] text-[#E4E3E0] p-6 rounded font-mono text-[10px] overflow-x-auto max-h-[300px] border border-white/10">
+                    <pre>{`# OuroborosSync.gd
+extends Node
+
+func _ready():
+    Firebase.Auth.login_anonymous()
+    var rtdb_ref = Firebase.Database.get_ref("live_world")
+    rtdb_ref.on_child_changed.connect(_on_world_tick)
+
+func _on_world_tick(data):
+    print("World Heartbeat: ", data.data)`}</pre>
+                  </div>
+                  <button 
+                    className="w-full py-4 border border-[#141414] text-[10px] font-mono uppercase tracking-widest hover:bg-[#141414] hover:text-[#E4E3E0] transition-all flex items-center justify-center gap-2"
+                    onClick={() => copyToClipboard(godotCode, 'Godot Script')}
+                  >
+                    <Code2 size={14} />
+                    {copyStatus === 'Godot Script' ? 'Copied!' : 'Copy GDScript'}
+                  </button>
+                </div>
+              </div>
+
+              <div className="border-t border-[#141414] pt-12">
+                <h3 className="font-serif italic text-3xl mb-8">3. Deployment Guide (PC & Mobile)</h3>
+                <div className="mb-8 p-6 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-4">
+                  <div className="p-2 bg-amber-100 rounded-lg text-amber-700">
+                    <Activity size={20} />
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-amber-900 text-sm uppercase tracking-wider mb-1">Kein Computer? Kein Problem!</h4>
+                    <p className="text-sm text-amber-800 leading-relaxed">
+                      Du kannst dein Backend direkt von deinem Android-Handy aus deployen. Nutze dazu die 
+                      <a href="https://shell.cloud.google.com" target="_blank" className="font-bold underline ml-1">Google Cloud Shell</a>. 
+                      Das ist ein kostenloser Computer im Browser, auf dem alle Firebase-Tools bereits vorinstalliert sind.
+                    </p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+                  {[
+                    { title: "Initialize", desc: "Öffne die Cloud Shell (oder Terminal) und gib 'firebase init' ein.", icon: Terminal },
+                    { title: "Configure", desc: "Kopiere den Code oben in die 'index.ts' Datei im Editor.", icon: Settings },
+                    { title: "Go Live", icon: Activity, desc: "Gib 'firebase deploy' ein. Deine Welt lebt!", icon: Activity }
+                  ].map((step, i) => (
+                    <div key={i} className="p-8 border border-[#141414] bg-white hover:bg-[#141414] hover:text-[#E4E3E0] transition-all group">
+                      <div className="text-5xl font-serif italic mb-6 opacity-20 group-hover:opacity-100 transition-opacity">0{i+1}</div>
+                      <div className="flex items-center gap-2 mb-3">
+                        <step.icon size={16} />
+                        <div className="font-mono text-[10px] uppercase tracking-widest font-bold">{step.title}</div>
+                      </div>
+                      <div className="text-sm opacity-70 group-hover:opacity-100">{step.desc}</div>
+                    </div>
+                  ))}
                 </div>
               </div>
             </motion.div>
