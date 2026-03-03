@@ -4,10 +4,25 @@ import { WebSocketServer, WebSocket } from 'ws';
 import helmet from 'helmet';
 import cors from 'cors';
 import { GoogleGenAI, Type } from "@google/genai";
+import next from 'next';
+import { parse } from 'url';
+
+const dev = process.env.NODE_ENV !== 'production';
+const nextApp = next({ dev });
+const handle = nextApp.getRequestHandler();
 
 // --- Configuration ---
-const PORT = 3000; // MUST be 3000
+const PORT = 3000;
 const GEMINI_API_KEY = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
+
+// --- Global Error Handling ---
+process.on('uncaughtException', (err) => {
+  console.error('CRITICAL: Uncaught Exception:', err);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('CRITICAL: Unhandled Rejection at:', promise, 'reason:', reason);
+});
 
 // --- World State (Full PDF Implementation) ---
 interface Agent {
@@ -181,98 +196,125 @@ async function generateAIContent(type: string, context: any) {
   return JSON.parse(response.text || '{}');
 }
 
-// --- Server Setup ---
-const app = express();
-app.use(helmet());
-app.use(cors());
-app.use(express.json());
+nextApp.prepare().then(() => {
+  const app = express();
+  app.use(helmet({
+    contentSecurityPolicy: false, // Disable CSP for development/iframe compatibility
+  }));
+  app.use(cors());
+  app.use(express.json());
 
-// API Routes
-app.get('/api/world-state', (req, res) => {
-  res.json(worldState);
-});
+  // API Routes
+  app.get('/api/world-state', (req, res) => {
+    res.json(worldState);
+  });
 
-app.post('/api/generate/:type', async (req, res) => {
-  const { type } = req.params;
-  const content = await generateAIContent(type, worldState);
-  res.json(content);
-});
+  app.post('/api/generate/:type', async (req, res) => {
+    const { type } = req.params;
+    const content = await generateAIContent(type, worldState);
+    res.json(content);
+  });
 
-// YouTube Automation Endpoint
-app.post('/api/youtube/automate', async (req, res) => {
-  const events = worldState.recent_events.length > 0 ? worldState.recent_events : ["Weekly Boss Kill", "Rare Drop Found"];
-  const script = await generateAIContent('youtube', events);
-  res.json({ status: 'success', script });
-});
+  // YouTube Automation Endpoint
+  app.post('/api/youtube/automate', async (req, res) => {
+    const events = worldState.recent_events.length > 0 ? worldState.recent_events : ["Weekly Boss Kill", "Rare Drop Found"];
+    const script = await generateAIContent('youtube', events);
+    res.json({ status: 'success', script });
+  });
 
-const server = http.createServer(app);
-const wss = new WebSocketServer({ server });
+  // Handle Next.js requests
+  app.all('*', (req, res) => {
+    const parsedUrl = parse(req.url!, true);
+    handle(req, res, parsedUrl);
+  });
 
-// WebSocket Logic (Godot Compatible)
-wss.on('connection', (ws: WebSocket) => {
-  console.log('Godot/Client connected');
-  worldState.active_players++;
+  const server = http.createServer(app);
+  const wss = new WebSocketServer({ 
+    server,
+    // Handle path to avoid conflicts with Next.js internal websockets if any
+    path: '/ws' 
+  });
 
-  // Send initial state
-  ws.send(JSON.stringify({ type: 'INIT', state: worldState }));
+  // Handle server-level WebSocket errors
+  wss.on('error', (error) => {
+    console.error('WebSocket Server Error:', error);
+  });
 
-  ws.on('message', (message) => {
-    try {
-      const data = JSON.parse(message.toString());
-      if (data.type === 'MOVE') {
-        // Update simulated player position
-        console.log(`Player moved to: ${data.x}, ${data.y}, ${data.z}`);
+  // WebSocket Logic (Godot Compatible)
+  wss.on('connection', (ws: WebSocket, req) => {
+    const ip = req.socket.remoteAddress;
+    console.log(`Godot/Client connected from ${ip}`);
+    worldState.active_players++;
+
+    // Handle individual socket errors
+    ws.on('error', (error) => {
+      console.error(`WebSocket Error from ${ip}:`, error);
+    });
+
+    // Send initial state
+    ws.send(JSON.stringify({ type: 'INIT', state: worldState }));
+
+    ws.on('message', (message) => {
+      try {
+        const data = JSON.parse(message.toString());
+        if (data.type === 'MOVE') {
+          // Update simulated player position
+          console.log(`Player moved to: ${data.x}, ${data.y}, ${data.z}`);
+        }
+      } catch (e) {
+        console.error('WS Message Parse Error:', e);
       }
-    } catch (e) {
-      console.error('WS Error:', e);
-    }
+    });
+
+    ws.on('close', () => {
+      worldState.active_players--;
+      console.log(`Client ${ip} disconnected`);
+    });
   });
 
-  ws.on('close', () => {
-    worldState.active_players--;
-    console.log('Client disconnected');
-  });
-});
+  // Game Loop (Tick Engine - PDF Section 31)
+  setInterval(() => {
+    worldState.tick++;
+    
+    // 1. Simulate Agent Movement
+    worldState.agents.forEach(agent => {
+      agent.x += (Math.random() - 0.5) * 2;
+      agent.z += (Math.random() - 0.5) * 2;
+    });
 
-// Game Loop (Tick Engine - PDF Section 31)
-setInterval(() => {
-  worldState.tick++;
-  
-  // 1. Simulate Agent Movement
-  worldState.agents.forEach(agent => {
-    agent.x += (Math.random() - 0.5) * 2;
-    agent.z += (Math.random() - 0.5) * 2;
-  });
-
-  // 2. Recursive Evolution (PDF Section 27)
-  worldState.cities.forEach(city => {
-    // Simulate weekly evolution every 10 ticks
-    if (worldState.tick % 10 === 0) {
-      city.economy_power = Math.min(1, city.economy_power + 0.01);
-      city.military_power = Math.min(1, city.military_power + 0.005);
-      city.ci = calculateCI(city);
-      
-      // Civilization Conflict Mechanik (PDF Section 28)
-      if (city.ci < 0.25) {
-        worldState.recent_events.push(`${city.name} is struggling. Buildings decaying.`);
+    // 2. Recursive Evolution (PDF Section 27)
+    worldState.cities.forEach(city => {
+      // Simulate weekly evolution every 10 ticks
+      if (worldState.tick % 10 === 0) {
+        city.economy_power = Math.min(1, city.economy_power + 0.01);
+        city.military_power = Math.min(1, city.military_power + 0.005);
+        city.ci = calculateCI(city);
+        
+        // Civilization Conflict Mechanik (PDF Section 28)
+        if (city.ci < 0.25) {
+          worldState.recent_events.push(`${city.name} is struggling. Buildings decaying.`);
+        }
       }
+    });
+
+    // 3. Update Economy (PDF Section 36)
+    if (worldState.tick % 5 === 0) {
+      updateEconomy();
     }
+
+    // 4. Broadcast state to all Godot clients
+    const stateUpdate = JSON.stringify({ type: 'TICK', state: worldState });
+    wss.clients.forEach(client => {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(stateUpdate);
+      }
+    });
+  }, 1000);
+
+  server.listen(PORT, () => {
+    console.log(`Arelorian Hybrid Server running on port ${PORT}`);
   });
-
-  // 3. Update Economy (PDF Section 36)
-  if (worldState.tick % 5 === 0) {
-    updateEconomy();
-  }
-
-  // 4. Broadcast state to all Godot clients
-  const stateUpdate = JSON.stringify({ type: 'TICK', state: worldState });
-  wss.clients.forEach(client => {
-    if (client.readyState === WebSocket.OPEN) {
-      client.send(stateUpdate);
-    }
-  });
-}, 1000);
-
-server.listen(PORT, () => {
-  console.log(`Arelorian Hybrid Server running on port ${PORT}`);
+}).catch((err) => {
+  console.error('Next.js preparation failed:', err);
+  if (process.env.NODE_ENV === 'production') process.exit(1);
 });

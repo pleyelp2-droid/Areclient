@@ -1,20 +1,51 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# Arelorian Axiom Engine & Ouroboros Content Brain
 
-# Run and deploy your AI Studio app
+This is the authoritative backend for the Ouroboros MMORPG, integrating AI-driven content generation with a high-performance game state engine.
 
-This contains everything you need to run your app locally.
+## 🚀 Production Deployment (Google Cloud VM: mmoinstanz)
 
-View your app in AI Studio: https://ai.studio/apps/125dcd43-028f-4920-98a9-ea36fc186e27
+### 1. Prerequisites
+- Ubuntu 24.04 LTS
+- Node.js 20.x
+- Access to Google Cloud SQL (Private IP: 10.46.0.3)
 
-## Run Locally
+### 2. Setup Environment
+SSH into your VM and run:
 
-**Prerequisites:**  Node.js
+```bash
+# Install Node.js
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt-get install -y nodejs build-essential
 
+# Clone the repository
+git clone <YOUR_GITHUB_REPO_URL>
+cd arelorian-axiom-engine
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+# Install dependencies
+npm install
+```
+
+### 3. Configure Secrets
+Create a `.env` file in the root directory:
+
+```env
+DATABASE_URL="postgresql://aeelorianclientmmo-run-sa@areareai.iam@10.46.0.3:5432/postgres"
+SOURCE_DATABASE_URL="postgresql://neondb_owner:npg_wbUmEvH8BQ7A@ep-blue-recipe-akekhixl.c-3.us-west-2.aws.neon.tech/neondb?sslmode=require"
+GOOGLE_APPLICATION_CREDENTIALS_JSON='{...your_json_key...}'
+NEXT_PUBLIC_GEMINI_API_KEY="your_gemini_api_key"
+```
+
+### 4. Start the Engine
+```bash
+# Start the hybrid server (Express + WebSocket)
+npm start
+```
+
+## 🎮 Godot Integration
+Point your Godot `WebSocketPeer` to `ws://<VM_EXTERNAL_IP>:3000`.
+
+## 🧠 AI Content Generation
+The server exposes endpoints for:
+- `/api/generate/quest`
+- `/api/generate/npc`
+- `/api/youtube/automate`

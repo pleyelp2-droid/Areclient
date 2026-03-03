@@ -5,22 +5,31 @@ let pool: Pool | null = null;
 
 export async function getDbPool() {
   if (!pool) {
-    const connectionString = process.env.DATABASE_URL;
+    // In preview environment, we might want to fallback to source if target is unreachable
+    const targetUrl = process.env.DATABASE_URL;
+    const sourceUrl = process.env.SOURCE_DATABASE_URL;
     const saKeyJson = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
 
+    // Determine which URL to try first
+    // If we are in the AI Studio preview, the private IP 10.46.0.3 will fail.
+    const isPreview = process.env.NEXT_PUBLIC_APP_URL?.includes('run.app');
+    const connectionString = (isPreview && sourceUrl) ? sourceUrl : (targetUrl || sourceUrl);
+
     if (!connectionString) {
-      throw new Error('DATABASE_URL is not defined in environment variables');
+      console.error('No database URL defined (DATABASE_URL or SOURCE_DATABASE_URL)');
+      return null;
     }
 
     let config: any = {
       connectionString,
-      ssl: connectionString.includes('127.0.0.1') ? false : {
+      connectionTimeoutMillis: 5000, // Don't hang forever
+      ssl: connectionString.includes('10.46.0.3') || connectionString.includes('127.0.0.1') ? false : {
         rejectUnauthorized: false,
       },
     };
 
-    // If using IAM Authentication with a Service Account Key
-    if (saKeyJson) {
+    // IAM Authentication logic for Google Cloud SQL
+    if (saKeyJson && connectionString.includes('10.46.0.3')) {
       try {
         const auth = new GoogleAuth({
           credentials: JSON.parse(saKeyJson),
@@ -29,17 +38,41 @@ export async function getDbPool() {
         const client = await auth.getClient();
         const token = await client.getAccessToken();
         
-        // Update connection string to use the token as password
-        const url = new URL(connectionString);
-        url.password = token.token || '';
-        config.connectionString = url.toString();
-        console.log("Using IAM Token for database authentication");
+        // Robust parsing for double-@ connection strings
+        // Format: postgresql://USER@PROJECT@HOST:PORT/DB
+        const parts = connectionString.split('@');
+        if (parts.length >= 3) {
+          const user = parts[0].replace('postgresql://', '') + '@' + parts[1];
+          const hostPortDb = parts[2];
+          const [hostPort, db] = hostPortDb.split('/');
+          const [host, port] = hostPort.split(':');
+          
+          config = {
+            user,
+            password: token.token || '',
+            host,
+            port: parseInt(port || '5432'),
+            database: db || 'postgres',
+            connectionTimeoutMillis: 5000,
+            ssl: false
+          };
+        }
+        console.log("Generated IAM Token for database authentication");
       } catch (e: any) {
-        console.error("Failed to generate IAM token for main pool:", e.message);
+        console.error("IAM Token generation failed:", e.message);
       }
     }
 
-    pool = new Pool(config);
+    try {
+      pool = new Pool(config);
+      // Test connection briefly
+      const client = await pool.connect();
+      client.release();
+      console.log(`Connected to database: ${connectionString.split('@')[1]?.split('/')[0] || 'unknown'}`);
+    } catch (err: any) {
+      console.error("Database connection failed, using mock/null pool:", err.message);
+      pool = null; // Reset so we can try again or handle null
+    }
   }
   return pool;
 }

@@ -411,7 +411,7 @@ export default function Dashboard() {
                   <div className="bg-[#141414] text-[#E4E3E0] p-4 font-mono text-xs rounded overflow-x-auto">
                     <pre>{`extends Node
 var socket := WebSocketPeer.new()
-var url := "ws://YOUR_SERVER_IP:PORT"
+var url := "ws://YOUR_SERVER_IP:3000/ws"
 
 func _ready():
     connect_to_server()
@@ -438,28 +438,28 @@ func _physics_process(delta):
                 </div>
 
                 <div className="border border-[#141414] p-8 col-span-2">
-                  <h3 className="font-serif italic text-2xl mb-6">Production Setup (IAM & Proxy)</h3>
+                  <h3 className="font-serif italic text-2xl mb-6">Production Setup (GitHub & VM)</h3>
                   <div className="bg-[#141414] text-[#E4E3E0] p-6 font-mono text-xs rounded overflow-x-auto">
-                    <pre>{`# 1. Install Cloud SQL Auth Proxy
-curl -o cloud-sql-proxy https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/v2.14.2/cloud-sql-proxy.linux.amd64
-chmod +x cloud-sql-proxy
+                    <pre>{`# 1. SSH into mmoinstanz
+gcloud compute ssh mmoinstanz --project areareai --zone <YOUR_ZONE>
 
-# 2. Start Proxy in background (using IAM Auth)
-# Replace INSTANCE_CONNECTION_NAME with: areareai:europe-west1:aeelorianclientmmo-db-a04b
-./cloud-sql-proxy --private-ip areareai:europe-west1:aeelorianclientmmo-db-a04b &
+# 2. Install Node.js & Git
+sudo apt-get update
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt-get install -y nodejs git build-essential
 
-# 3. Connect via IAM Service Account
-# Ensure the SA has 'Cloud SQL Instance User' role
-export PGPASSWORD=$(gcloud auth print-access-token)
-psql -h 127.0.0.1 -U aeelorianclientmmo-run-sa@areareai.iam -d postgres
+# 3. Clone your new GitHub Repo
+git clone <YOUR_GITHUB_REPO_URL>
+cd <REPO_NAME>
 
-# 4. Axiom Engine Config
-export DATABASE_URL="postgresql://aeelorianclientmmo-run-sa@areareai.iam:TOKEN@127.0.0.1:5432/postgres"
+# 4. Install & Start
+npm install
+# Set your secrets in a .env file first!
 npm start`}</pre>
                   </div>
-                  <div className="mt-4 p-4 border border-amber-500/20 bg-amber-500/5 text-amber-900 text-xs">
-                    <p className="font-bold mb-1">⚠️ IAM Requirement:</p>
-                    <p>The service account <code className="bg-white/50 px-1">aeelorianclientmmo-run-sa@areareai.iam</code> must be added as a user in the Cloud SQL "Users" tab with "Cloud IAM" authentication type.</p>
+                  <div className="mt-4 p-4 border border-emerald-500/20 bg-emerald-500/5 text-emerald-800 text-xs">
+                    <p className="font-bold mb-1">✅ GitHub Ready:</p>
+                    <p>Your project is now prepared for export. Push your changes to GitHub, then run the commands above on your VM to bring the Arelorian Brain online.</p>
                   </div>
                 </div>
               </div>

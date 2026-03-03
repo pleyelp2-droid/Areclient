@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { Pool } from 'pg';
 import { GoogleAuth } from 'google-auth-library';
+import { getDbPool } from '@/lib/db';
 
 export async function POST() {
   const sourceUrl = process.env.SOURCE_DATABASE_URL;
@@ -34,10 +35,11 @@ export async function POST() {
   }
 
   const sourcePool = new Pool({ connectionString: sourceUrl, ssl: { rejectUnauthorized: false } });
-  const targetPool = new Pool({ 
-    ...targetConfig,
-    ssl: targetUrl.includes('127.0.0.1') ? false : { rejectUnauthorized: false } 
-  });
+  const targetPool = await getDbPool();
+
+  if (!targetPool) {
+    return NextResponse.json({ error: "Target database unreachable (Private IP 10.46.0.3 is only accessible from your Google VM)" }, { status: 503 });
+  }
 
   try {
     const tables = ['quests', 'npc_profiles', 'lore_entries', 'agents', 'world_state'];
