@@ -129,59 +129,74 @@ admin.initializeApp();
 const db = admin.firestore();
 const rtdb = admin.database();
 
-const GEMINI_API_KEY = functions.config().ouroboros?.gemini_key || process.env.GEMINI_API_KEY;
-const genAI = GEMINI_API_KEY ? new GoogleGenAI(GEMINI_API_KEY) : null;
+// --- DETERMINISTIC CORE (PHASE 2) ---
+class OuroborosCore {
+  state: any;
+  constructor(initialState: any) {
+    this.state = initialState;
+  }
+  step(inputs: any[]) {
+    this.state.tick++;
+    // Deterministic logic here...
+    return this.state;
+  }
+}
 
 export const worldHeartbeat = functions.pubsub.schedule('every 1 minutes').onRun(async (context) => {
   const worldRef = db.collection('world_state').doc('current');
   const snap = await worldRef.get();
-  const state = snap.data() || { tick: 0 };
-  const newTick = (state.tick || 0) + 1;
-  await worldRef.update({ tick: newTick, last_pulse: admin.firestore.FieldValue.serverTimestamp() });
-  await rtdb.ref('live_world').set({ tick: newTick, timestamp: Date.now() });
+  const state = snap.data() || { tick: 0, entities: {}, economy: { total_currency: 1000000 } };
+  
+  const core = new OuroborosCore(state);
+  const newState = core.step([]); // Headless step
+  
+  await worldRef.set(newState);
+  await rtdb.ref('live_world').set({ 
+    tick: newState.tick, 
+    timestamp: Date.now(),
+    economy: newState.economy 
+  });
   return null;
-});
-
-export const generateGameContent = functions.https.onCall(async (data, context) => {
-  if (!genAI) throw new functions.https.HttpsError('failed-precondition', 'AI not configured');
-  const { type, context: gameContext } = data;
-  const model = genAI.getGenerativeModel({ model: "gemini-3-flash-preview" });
-  const prompt = \`Generate \${type} for Ouroboros MMO. Context: \${JSON.stringify(gameContext)}\`;
-  const result = await model.generateContent(prompt);
-  const content = JSON.parse(result.response.text());
-  await db.collection(type + 's').add({ ...content, created_at: admin.firestore.FieldValue.serverTimestamp() });
-  return content;
 });`;
 
   const godotCode = `extends Node
-# --- OUROBOROS AUTO-SYNC MANAGER ---
-var player_id = ""
+# --- OUROBOROS THIN CLIENT (PHASE 4) ---
+# Godot is a "Dumb Terminal". It only renders what the server dictates.
+
 var world_state = {}
+var entities = {} # Local instances of characters/objects
 
 func _ready():
 	Firebase.Auth.login_anonymous()
-	Firebase.Auth.login_succeeded.connect(_on_login_success)
 	var rtdb_ref = Firebase.Database.get_ref("live_world")
-	rtdb_ref.on_child_changed.connect(_on_world_tick)
+	rtdb_ref.on_child_changed.connect(_on_server_state_diff)
 
-func _on_login_success(auth):
-	player_id = auth.localid
-	var firestore_doc = Firebase.Firestore.collection("world_state").doc("current")
-	firestore_doc.get_doc()
-	firestore_doc.get_document_finished.connect(_on_state_loaded)
+func _on_server_state_diff(data):
+	# 1. Receive State Diff
+	var diff = data.data
+	
+	# 2. Update Local Representation
+	if diff.has("entities"):
+		for id in diff.entities:
+			_update_entity(id, diff.entities[id])
 
-func _on_state_loaded(doc):
-	world_state = doc.doc_fields
+func _update_entity(id, data):
+	if not entities.has(id):
+		# Instantiate new visual representation
+		entities[id] = load("res://scenes/Entity.tscn").instantiate()
+		add_child(entities[id])
+	
+	# Interpolate to target position (No local physics calculation)
+	entities[id].target_pos = Vector3(data.x, data.y, data.z)
 
-func _on_world_tick(data):
-	print("World Heartbeat received: ", data.data)
-
-func sync_position(pos: Vector3):
-	var pos_ref = Firebase.Database.get_ref("live_positions/" + player_id)
-	pos_ref.update({"x": pos.x, "y": pos.y, "z": pos.z})`;
+func send_input(action: String):
+	# Only send intent to server. Do not move locally yet.
+	var input_ref = Firebase.Database.get_ref("player_inputs/" + Firebase.Auth.get_user_id())
+	input_ref.push({"action": action, "timestamp": Time.get_unix_time_from_system()})`;
 
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<any>(null);
+  const [brainStats, setBrainStats] = useState<any>(null);
   const [worldContext, setWorldContext] = useState({
     region_state: 'War-torn',
     biome_type: 'Volcanic Wastes',
@@ -263,6 +278,7 @@ func sync_position(pos: Vector3):
           <SidebarItem icon={Database} label="Database Sync" active={activeTab === 'db'} onClick={() => setActiveTab('db')} />
           <SidebarItem icon={ShieldCheck} label="Validation Layer" active={activeTab === 'validation'} onClick={() => setActiveTab('validation')} />
           <SidebarItem icon={Zap} label="Firebase Auto-Sync" active={activeTab === 'firebase'} onClick={() => setActiveTab('firebase')} />
+          <SidebarItem icon={ShieldCheck} label="Architecture Plan" active={activeTab === 'architecture'} onClick={() => setActiveTab('architecture')} />
         </nav>
 
         <div className="p-4 border-t border-[#141414] bg-[#141414] text-[#E4E3E0]">
@@ -636,6 +652,49 @@ npm start`}</pre>
               </div>
             </motion.div>
           )}
+          {activeTab === 'architecture' && (
+            <motion.div
+              key="architecture"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+            >
+              <SectionHeader title="Architecture Transformation" subtitle="8-Phase Deterministic Roadmap" />
+              
+              <div className="grid grid-cols-1 gap-4 mb-12">
+                {[
+                  { phase: 1, title: "Netzwerk-Protokoll", desc: "Binäre, engine-agnostische Schicht (Protobuf).", risk: "Logic Creep im Client" },
+                  { phase: 2, title: "Deterministischer Core-Loop", desc: "Isolierung der Simulationslogik in fixen Takt.", risk: "State-Desynchronisation" },
+                  { phase: 3, title: "Persistenz-Layer", desc: "Transaktionssichere DB-Schreibprozesse.", risk: "Datenverlust bei Restart" },
+                  { phase: 4, title: "Godot Thin Client", desc: "Godot als Dumb Terminal (Interpolation).", risk: "Cheating-Anfälligkeit" },
+                  { phase: 5, title: "Wirtschaft & Evolution", desc: "Mathematische Backend-Dienste.", risk: "Hyperinflation" },
+                  { phase: 6, title: "Warfare & Loot", desc: "Kampflogik im deterministischen Loop.", risk: "Exploits" },
+                  { phase: 7, title: "Vertex AI Pipeline", desc: "Asynchrone Quest/Lore Generierung.", risk: "Immersionsbruch" },
+                  { phase: 8, title: "System-Freeze", desc: "Versiegelung der Architektur.", risk: "Feature Creep" }
+                ].map((p) => (
+                  <div key={p.phase} className="border border-[#141414] p-6 flex items-center gap-6 bg-white hover:bg-[#141414] hover:text-[#E4E3E0] transition-all group">
+                    <div className="text-4xl font-serif italic opacity-20 group-hover:opacity-100">0{p.phase}</div>
+                    <div className="flex-1">
+                      <h4 className="font-bold uppercase tracking-widest text-sm">{p.title}</h4>
+                      <p className="text-xs opacity-60 group-hover:opacity-80">{p.desc}</p>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-[10px] uppercase tracking-widest opacity-40 mb-1">Eliminiertes Risiko</div>
+                      <div className="text-[10px] font-mono text-rose-500 group-hover:text-rose-400">{p.risk}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="p-8 border border-[#141414] bg-[#141414] text-[#E4E3E0]">
+                <h3 className="font-serif italic text-2xl mb-4">Direktionssatz</h3>
+                <p className="text-sm leading-relaxed opacity-80">
+                  Die absolute Trennung von deterministischer Server-Autorität und rein repräsentativem Godot-Rendering ist das nicht verhandelbare Fundament, dem jede Feature-Entwicklung unterzuordnen ist.
+                </p>
+              </div>
+            </motion.div>
+          )}
+
           {activeTab === 'firebase' && (
             <motion.div
               key="firebase"
@@ -654,7 +713,7 @@ npm start`}</pre>
                     <h3 className="font-serif italic text-3xl">1. Cloud Functions</h3>
                   </div>
                   <p className="text-sm opacity-70 leading-relaxed font-mono">
-                    Ports your entire Tick-Engine and AI logic to Google's serverless infrastructure. 
+                    Ports your entire Tick-Engine and AI logic to Google&apos;s serverless infrastructure. 
                   </p>
                   <div className="bg-[#141414] text-[#E4E3E0] p-6 rounded font-mono text-[10px] overflow-x-auto max-h-[300px] border border-white/10">
                     <pre>{`// functions/index.ts
@@ -714,6 +773,39 @@ func _on_world_tick(data):
               </div>
 
               <div className="border-t border-[#141414] pt-12">
+                <h3 className="font-serif italic text-3xl mb-8">4. Admin Brain Menu</h3>
+                <div className="p-8 border border-[#141414] bg-white">
+                  <div className="flex gap-4 mb-6">
+                    <input 
+                      type="text" 
+                      placeholder="Target Filesystem Path" 
+                      className="flex-1 p-4 border border-[#141414] font-mono text-sm"
+                      id="targetDirInput"
+                    />
+                    <button 
+                      className="px-8 py-4 bg-[#141414] text-[#E4E3E0] font-mono uppercase tracking-widest hover:invert"
+                      onClick={async () => {
+                        const targetDir = (document.getElementById('targetDirInput') as HTMLInputElement).value;
+                        const res = await fetch('/api/brain/scan', { method: 'POST', body: JSON.stringify({ targetDir }) });
+                        const data = await res.json();
+                        setBrainStats(data.stats);
+                      }}
+                    >
+                      Rescan Filesystem
+                    </button>
+                  </div>
+                  {brainStats && (
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 font-mono text-xs">
+                      <div className="p-4 bg-gray-100">Type: {brainStats.type}</div>
+                      <div className="p-4 bg-gray-100">Graphics: {brainStats.graphicsModules}</div>
+                      <div className="p-4 bg-gray-100">Textures: {brainStats.textures}</div>
+                      <div className="p-4 bg-gray-100">Rules: {brainStats.gameRules}</div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="border-t border-[#141414] pt-12">
                 <h3 className="font-serif italic text-3xl mb-8">3. Deployment Guide (PC & Mobile)</h3>
                 <div className="mb-8 p-6 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-4">
                   <div className="p-2 bg-amber-100 rounded-lg text-amber-700">
@@ -732,7 +824,7 @@ func _on_world_tick(data):
                   {[
                     { title: "Initialize", desc: "Öffne die Cloud Shell (oder Terminal) und gib 'firebase init' ein.", icon: Terminal },
                     { title: "Configure", desc: "Kopiere den Code oben in die 'index.ts' Datei im Editor.", icon: Settings },
-                    { title: "Go Live", icon: Activity, desc: "Gib 'firebase deploy' ein. Deine Welt lebt!", icon: Activity }
+                    { title: "Go Live", desc: "Gib 'firebase deploy' ein. Deine Welt lebt!", icon: Activity }
                   ].map((step, i) => (
                     <div key={i} className="p-8 border border-[#141414] bg-white hover:bg-[#141414] hover:text-[#E4E3E0] transition-all group">
                       <div className="text-5xl font-serif italic mb-6 opacity-20 group-hover:opacity-100 transition-opacity">0{i+1}</div>
